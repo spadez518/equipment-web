@@ -1,0 +1,429 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8" />
+    <title>相机借用申请</title>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+    <style>
+        body {
+            font-family: system-ui, sans-serif;
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 24px;
+        }
+
+        h1 {
+            font-size: 24px;
+            margin-bottom: 12px;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 24px;
+        }
+
+        th,
+        td {
+            border: 1px solid #ccc;
+            padding: 8px;
+            text-align: left;
+        }
+
+        th {
+            background: #f0f0f0;
+        }
+
+        label {
+            display: block;
+            margin-top: 12px;
+            font-size: 14px;
+        }
+
+        input,
+        select {
+            width: 100%;
+            padding: 8px;
+            margin-top: 4px;
+            box-sizing: border-box;
+        }
+
+        .row {
+            display: flex;
+            gap: 16px;
+        }
+
+        .row>div {
+            flex: 1;
+        }
+
+        button {
+            margin-top: 20px;
+            padding: 10px 20px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+
+        .msg {
+            margin-top: 16px;
+            font-size: 15px;
+        }
+
+        .msg.error {
+            color: #c00;
+        }
+
+        .msg.success {
+            color: #0a7;
+        }
+
+        .code-box {
+            margin-top: 10px;
+            padding: 10px;
+            background: #f3f3f3;
+            border-radius: 6px;
+            font-family: monospace;
+        }
+    </style>
+</head>
+
+<body>
+
+    <h1>相机借用申请</h1>
+
+    <!-- ====== 设备状态表区域 ====== -->
+    <h2>当前设备状态</h2>
+    <table>
+        <thead>
+            <tr>
+                <th>设备名称</th>
+                <th>型号</th>
+                <th>状态</th>
+                <th>借用单位</th>
+                <th>联系人</th>
+                <th>微信</th>
+                <th>借用时间</th>
+            </tr>
+        </thead>
+        <tbody id="device-status-body">
+            <tr>
+                <td colspan="6">加载中...</td>
+            </tr>
+        </tbody>
+    </table>
+
+    <!-- ====== 借用申请表格 ====== -->
+    <h2>填写借用信息</h2>
+    <form id="borrow-form">
+
+        <label>借用单位
+            <input type="text" id="org_name" required />
+        </label>
+
+        <label>联系人姓名
+            <input type="text" id="contact_name" required />
+        </label>
+
+        <label>联系人微信号
+            <input type="text" id="contact_phone" required />
+        </label>
+
+        <label>选择设备
+            <select id="device_id" required></select>
+        </label>
+
+        <div class="row">
+            <div>
+                <label>借用日期时间
+                    <input type="datetime-local" id="take_time" required />
+                </label>
+            </div>
+            <div>
+                <label>归还日期时间
+                    <input type="datetime-local" id="return_time" required />
+                </label>
+            </div>
+        </div>
+
+        <div class="row">
+            <div>
+                <label>活动开始时间
+                    <input type="datetime-local" id="event_start_time" required />
+                </label>
+            </div>
+            <div>
+                <label>活动结束时间
+                    <input type="datetime-local" id="event_end_time" required />
+                </label>
+            </div>
+        </div>
+
+        <div class="row">
+            <div>
+                <label>充电器数量
+                    <input type="number" min="0" value="0" id="charger_count" />
+                </label>
+            </div>
+
+            <div>
+                <label>电池数量
+                    <input type="number" min="0" value="0" id="battery_count" />
+                </label>
+            </div>
+
+            <div>
+                <label>相机包数量
+                    <input type="number" min="0" value="0" id="bag_count" />
+                </label>
+            </div>
+        </div>
+
+        <button type="submit">提交借用申请</button>
+    </form>
+
+    <div id="result" class="msg"></div>
+    <div id="ticket" class="code-box" style="display:none;"></div>
+
+    <script>
+        // ======== 配置区：替换成你的项目参数 ========
+        const SUPABASE_URL = "https://oivoqbmnvfawbeaplphz.supabase.co";
+        const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9pdm9xYm1udmZhd2JlYXBscGh6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjUwNTk3NzEsImV4cCI6MjA4MDYzNTc3MX0.GOX1M7SASmLnd6dYjxpTRGAZ-pYdwwmm9Qg576XIL_c";
+        const BORROW_FUNCTION_URL = "https://oivoqbmnvfawbeaplphz.supabase.co/functions/v1/borrow";
+
+        // 从全局 window.supabase 中拿 createClient
+        const { createClient } = window.supabase;
+        // 创建客户端实例，名字你可以继续叫 supabase
+        const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+        const deviceStatusBody = document.getElementById("device-status-body");
+        const deviceSelect = document.getElementById("device_id");
+
+        // // ======== A. 加载设备状态表 ========
+        // async function loadDeviceStatus() {
+        //     // 查询设备
+        //     const { data: devices, error: dErr } = await supabase
+        //         .from("devices")
+        //         .select("*")
+        //         .order("id");
+
+        //     if (dErr || !devices) {
+        //         deviceStatusBody.innerHTML = `<tr><td colspan="6">加载失败</td></tr>`;
+        //         return;
+        //     }
+
+        //     // 查询未归还记录
+        //     const { data: records } = await supabase
+        //         .from("borrow_records")
+        //         .select("*")
+        //         .is("actual_return_time", null);  // 实际归还时间为空 = 还在借用
+
+        //     deviceStatusBody.innerHTML = "";
+        //     deviceSelect.innerHTML = `<option value="">请选择设备</option>`;
+
+        //     devices.forEach(d => {
+        //         const rec = records.find(r => r.device_id === d.id);
+
+        //         let status = "空闲";
+        //         let org = "";
+        //         let contact = "";
+        //         let wechat = "";
+        //         let time = "";
+
+        //         if (rec) {
+        //             status = "使用中";
+        //             org = rec.org_name;
+        //             contact = rec.contact_name;
+        //             wechat = rec.contact_phone;
+
+        //             // const s = rec.event_start_time ? new Date(rec.event_start_time) : null;
+        //             // const e = rec.event_end_time ? new Date(rec.event_end_time) : null;
+        //             // if (s && e) time = `${formatDate(s)} ~ ${formatDate(e)}`;
+        //             const s = rec.take_time ? new Date(rec.take_time) : null;
+        //             const e = rec.return_time ? new Date(rec.return_time) : null;
+        //             if (s && e) {
+        //                 time = `${formatDate(s)} ~ ${formatDate(e)}`;
+        //             }
+
+        //         }
+
+        //         // 写入状态表
+        //         deviceStatusBody.innerHTML += `
+        //   <tr>
+        //     <td>${d.name}</td>
+        //     <td>${d.code}</td>
+        //     <td>${status}</td>
+        //     <td>${org}</td>
+        //     <td>${contact}</td>
+        //     <td>${wechat}</td>
+        //     <td>${time}</td>
+        //   </tr>
+        // `;
+
+        //         // 写入下拉选项
+        //         deviceSelect.innerHTML += `<option value="${d.id}">${d.name}</option>`;
+        //     });
+        // }
+
+        // const formatDate = d => d.toLocaleString("zh-CN", { hour12: false });
+
+        // loadDeviceStatus();
+
+        // ======== A. 加载设备状态表 ========
+        async function loadDeviceStatus() {
+            // 1. 查设备列表
+            const { data: devices, error: dErr } = await supabase
+                .from("devices")
+                .select("*")
+                .order("id");
+
+            if (dErr || !devices) {
+                console.error("devices error", dErr);
+                deviceStatusBody.innerHTML = `<tr><td colspan="7">加载失败</td></tr>`;
+                return;
+            }
+
+            // 2. 查所有“尚未实际归还”的借用记录
+            const { data: records, error: rErr } = await supabase
+                .from("borrow_records")
+                .select("*")
+                .is("actual_return_time", null);
+
+            if (rErr) {
+                console.error("records error", rErr);
+            }
+
+            deviceStatusBody.innerHTML = "";
+            deviceSelect.innerHTML = `<option value="">请选择设备</option>`;
+
+            // 3. 按设备展开
+            devices.forEach((d) => {
+                // 这一台设备当前所有借用记录（可能是 0/1/多 条）
+                const devRecords = (records || []).filter((r) => r.device_id === d.id);
+
+                // 下拉框：每个设备只加一次
+                deviceSelect.innerHTML += `<option value="${d.id}">${d.name}</option>`;
+
+                if (devRecords.length === 0) {
+                    // 没有任何未归还记录 -> 空闲
+                    deviceStatusBody.innerHTML += `
+                <tr>
+                <td>${d.name}</td>
+                <td>${d.code}</td>
+                <td>空闲</td>
+                <td></td>
+                <td></td>
+                <td></td>
+                <td></td>
+                </tr>
+            `;
+                } else {
+                    // 有多条未归还记录 -> 每条一行
+                    devRecords.forEach((rec) => {
+                        const s = rec.take_time ? new Date(rec.take_time) : null;
+                        const e = rec.return_time ? new Date(rec.return_time) : null;
+                        let timeText = "";
+                        if (s && e) {
+                            timeText = `${formatDate(s)} ~ ${formatDate(e)}`;
+                        }
+
+                        deviceStatusBody.innerHTML += `
+                <tr>
+                    <td>${d.name}</td>
+                    <td>${d.code}</td>
+                    <td>使用中</td>
+                    <td>${rec.org_name || ""}</td>
+                    <td>${rec.contact_name || ""}</td>
+                    <td>${rec.contact_phone || ""}</td>
+                    <td>${timeText}</td>
+                </tr>
+                `;
+                    });
+                }
+            });
+        }
+
+        const formatDate = d => d.toLocaleString("zh-CN", { hour12: false });
+        loadDeviceStatus();
+
+        // ======== B. 提交借用表单 ========
+        const form = document.getElementById("borrow-form");
+        const resultEl = document.getElementById("result");
+        const ticketEl = document.getElementById("ticket");
+
+        const toISO = v => v ? new Date(v).toISOString() : null;
+
+        form.addEventListener("submit", async e => {
+            e.preventDefault();
+            resultEl.textContent = "";
+            ticketEl.style.display = "none";
+
+            const body = {
+                device_id: Number(deviceSelect.value),
+                org_name: document.getElementById("org_name").value.trim(),
+                contact_name: document.getElementById("contact_name").value.trim(),
+                contact_phone: document.getElementById("contact_phone").value.trim(),
+                take_time: toISO(document.getElementById("take_time").value),
+                return_time: toISO(document.getElementById("return_time").value),
+                event_start_time: toISO(document.getElementById("event_start_time").value),
+                event_end_time: toISO(document.getElementById("event_end_time").value),
+                charger_count: Number(document.getElementById("charger_count").value),
+                battery_count: Number(document.getElementById("battery_count").value),
+                bag_count: Number(document.getElementById("bag_count").value),
+            };
+
+            try {
+                // const resp = await fetch(BORROW_FUNCTION_URL, {
+                //     method: "POST",
+                //     headers: { "Content-Type": "application/json" },
+                //     body: JSON.stringify(body),
+                // });
+
+                const resp = await fetch(BORROW_FUNCTION_URL, {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json",
+                        // 这两行是关键：带上 anon key
+                        "apikey": SUPABASE_ANON_KEY,
+                        "Authorization": `Bearer ${SUPABASE_ANON_KEY}`,
+                    },
+                    body: JSON.stringify(body),
+                });
+
+
+                const data = await resp.json();
+
+                if (!data.ok) {
+                    resultEl.textContent = data.message;
+                    resultEl.className = "msg error";
+                    return;
+                }
+
+                resultEl.className = "msg success";
+
+                // pickup逻辑显示
+                const pickup = data.pickup || { mode: "office" };
+
+                if (pickup.mode === "office") {
+                    resultEl.textContent = "申请成功！请在借用日期前往办公室领取设备。（请截图保存凭证号）";
+                } else {
+                    resultEl.textContent =
+                        `申请成功！请联系当前借用人进行设备交接：` +
+                        `${pickup.org_name}（联系人：${pickup.contact_name}，微信：${pickup.contact_phone}）`;
+                }
+
+                // 显示凭证号
+                ticketEl.style.display = "block";
+                ticketEl.textContent = `凭证号：${data.ticket.ticket_code}`;
+
+            } catch (err) {
+                resultEl.textContent = "提交失败，请检查网络。";
+                resultEl.className = "msg error";
+            }
+        });
+    </script>
+
+</body>
+
+</html>
