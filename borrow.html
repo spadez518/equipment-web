@@ -93,6 +93,7 @@
 
     <h1>相机借用申请</h1>
 
+    <!-- ====== 设备状态表区域 ====== -->
     <h2>当前设备状态</h2>
     <table>
         <thead>
@@ -108,13 +109,15 @@
         </thead>
         <tbody id="device-status-body">
             <tr>
-                <td colspan="7">加载中...</td>
+                <td colspan="6">加载中...</td>
             </tr>
         </tbody>
     </table>
 
+    <!-- ====== 借用申请表格 ====== -->
     <h2>填写借用信息</h2>
     <form id="borrow-form">
+
         <label>借用单位
             <input type="text" id="org_name" required />
         </label>
@@ -163,11 +166,13 @@
                     <input type="number" min="0" value="0" id="charger_count" />
                 </label>
             </div>
+
             <div>
                 <label>电池数量
                     <input type="number" min="0" value="0" id="battery_count" />
                 </label>
             </div>
+
             <div>
                 <label>相机包数量
                     <input type="number" min="0" value="0" id="bag_count" />
@@ -182,71 +187,177 @@
     <div id="ticket" class="code-box" style="display:none;"></div>
 
     <script>
-        // const SUPABASE_URL = "https://oivoqbmnvfawbeaplphz.supabase.co";
-        // const SUPABASE_ANON_KEY = "你的 anon key";
-        // const BORROW_FUNCTION_URL = "https://oivoqbmnvfawbeaplphz.supabase.co/functions/v1/borrow";
+        // ======== 配置区：替换成你的项目参数 ========
         const SUPABASE_URL = "https://oivoqbmnvfawbeaplphz.supabase.co";
         const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9pdm9xYm1udmZhd2JlYXBscGh6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjUwNTk3NzEsImV4cCI6MjA4MDYzNTc3MX0.GOX1M7SASmLnd6dYjxpTRGAZ-pYdwwmm9Qg576XIL_c";
         const BORROW_FUNCTION_URL = "https://oivoqbmnvfawbeaplphz.supabase.co/functions/v1/borrow";
 
-
+        // 从全局 window.supabase 中拿 createClient
         const { createClient } = window.supabase;
-        const supabaseClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+        // 创建客户端实例，名字你可以继续叫 supabase，也可以改别的
+        //const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+        const supabaseClient = createClient(
+            SUPABASE_URL,
+            SUPABASE_ANON_KEY
+        );
+
 
         const deviceStatusBody = document.getElementById("device-status-body");
         const deviceSelect = document.getElementById("device_id");
 
+
+        // ======== A. 加载设备状态表 ========
         async function loadDeviceStatus() {
-            const { data: devices, error: dErr } = await supabaseClient
+            // 1. 查设备列表
+            const { data: devices, error: dErr } = await supabaseClien
                 .from("devices")
                 .select("*")
                 .order("id");
 
             if (dErr || !devices) {
+                console.error("devices error", dErr);
                 deviceStatusBody.innerHTML = `<tr><td colspan="7">加载失败</td></tr>`;
                 return;
             }
 
-            const { data: records } = await supabaseClient
+            // 2. 查所有“尚未实际归还”的借用记录
+            const { data: records, error: rErr } = await supabaseClien
                 .from("borrow_records")
                 .select("*")
                 .is("actual_return_time", null);
 
+            if (rErr) {
+                console.error("records error", rErr);
+            }
+
             deviceStatusBody.innerHTML = "";
             deviceSelect.innerHTML = `<option value="">请选择设备</option>`;
 
-            devices.forEach(d => {
-                const devRecords = (records || []).filter(r => r.device_id === d.id);
+            // 3. 按设备展开
+            devices.forEach((d) => {
+                // 这一台设备当前所有借用记录（可能是 0/1/多 条）
+                const devRecords = (records || []).filter((r) => r.device_id === d.id);
+
+                // 下拉框：每个设备只加一次
                 deviceSelect.innerHTML += `<option value="${d.id}">${d.name}</option>`;
 
                 if (devRecords.length === 0) {
+                    // 没有任何未归还记录 -> 空闲
                     deviceStatusBody.innerHTML += `
-                        <tr>
-                            <td>${d.name}</td>
-                            <td>${d.code}</td>
-                            <td>空闲</td>
-                            <td></td><td></td><td></td><td></td>
-                        </tr>`;
+                <tr>
+                <td>${d.name}</td>
+                <td>${d.code}</td>
+                <td>空闲</td>
+                <td></td>
+                <td></td>
+                <td></td>
+                <td></td>
+                </tr>
+            `;
                 } else {
-                    devRecords.forEach(rec => {
-                        const s = new Date(rec.take_time);
-                        const e = new Date(rec.return_time);
+                    // 有多条未归还记录 -> 每条一行
+                    devRecords.forEach((rec) => {
+                        const s = rec.take_time ? new Date(rec.take_time) : null;
+                        const e = rec.return_time ? new Date(rec.return_time) : null;
+                        let timeText = "";
+                        if (s && e) {
+                            timeText = `${formatDate(s)} ~ ${formatDate(e)}`;
+                        }
+
                         deviceStatusBody.innerHTML += `
-                            <tr>
-                                <td>${d.name}</td>
-                                <td>${d.code}</td>
-                                <td>使用中</td>
-                                <td>${rec.org_name || ""}</td>
-                                <td>${rec.contact_name || ""}</td>
-                                <td>${rec.contact_phone || ""}</td>
-                                <td>${s.toLocaleString()} ~ ${e.toLocaleString()}</td>
-                            </tr>`;
+                <tr>
+                    <td>${d.name}</td>
+                    <td>${d.code}</td>
+                    <td>使用中</td>
+                    <td>${rec.org_name || ""}</td>
+                    <td>${rec.contact_name || ""}</td>
+                    <td>${rec.contact_phone || ""}</td>
+                    <td>${timeText}</td>
+                </tr>
+                `;
                     });
                 }
             });
         }
 
+        const formatDate = d => d.toLocaleString("zh-CN", { hour12: false });
         loadDeviceStatus();
+
+        // ======== B. 提交借用表单 ========
+        const form = document.getElementById("borrow-form");
+        const resultEl = document.getElementById("result");
+        const ticketEl = document.getElementById("ticket");
+
+        const toISO = v => v ? new Date(v).toISOString() : null;
+
+        form.addEventListener("submit", async e => {
+            e.preventDefault();
+            resultEl.textContent = "";
+            ticketEl.style.display = "none";
+
+            const body = {
+                device_id: Number(deviceSelect.value),
+                org_name: document.getElementById("org_name").value.trim(),
+                contact_name: document.getElementById("contact_name").value.trim(),
+                contact_phone: document.getElementById("contact_phone").value.trim(),
+                take_time: toISO(document.getElementById("take_time").value),
+                return_time: toISO(document.getElementById("return_time").value),
+                event_start_time: toISO(document.getElementById("event_start_time").value),
+                event_end_time: toISO(document.getElementById("event_end_time").value),
+                charger_count: Number(document.getElementById("charger_count").value),
+                battery_count: Number(document.getElementById("battery_count").value),
+                bag_count: Number(document.getElementById("bag_count").value),
+            };
+
+            try {
+                // const resp = await fetch(BORROW_FUNCTION_URL, {
+                //     method: "POST",
+                //     headers: { "Content-Type": "application/json" },
+                //     body: JSON.stringify(body),
+                // });
+
+                const resp = await fetch(BORROW_FUNCTION_URL, {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json",
+                        // 这两行是关键：带上 anon key
+                        "apikey": SUPABASE_ANON_KEY,
+                        "Authorization": `Bearer ${SUPABASE_ANON_KEY}`,
+                    },
+                    body: JSON.stringify(body),
+                });
+
+
+                const data = await resp.json();
+
+                if (!data.ok) {
+                    resultEl.textContent = data.message;
+                    resultEl.className = "msg error";
+                    return;
+                }
+
+                resultEl.className = "msg success";
+
+                // pickup逻辑显示
+                const pickup = data.pickup || { mode: "office" };
+
+                if (pickup.mode === "office") {
+                    resultEl.textContent = "申请成功！请在借用日期前往办公室领取设备。（请截图保存凭证号）";
+                } else {
+                    resultEl.textContent =
+                        `申请成功！请联系当前借用人进行设备交接：` +
+                        `${pickup.org_name}（联系人：${pickup.contact_name}，微信：${pickup.contact_phone}）`;
+                }
+
+                // 显示凭证号
+                ticketEl.style.display = "block";
+                ticketEl.textContent = `凭证号：${data.ticket.ticket_code}`;
+
+            } catch (err) {
+                resultEl.textContent = "提交失败，请检查网络。";
+                resultEl.className = "msg error";
+            }
+        });
     </script>
 
 </body>
