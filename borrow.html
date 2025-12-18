@@ -209,7 +209,7 @@
         // ======== A. 加载设备状态表 ========
         async function loadDeviceStatus() {
             // 1. 查设备列表
-            const { data: devices, error: dErr } = await supabaseClien
+            const { data: devices, error: dErr } = await supabaseClient
                 .from("devices")
                 .select("*")
                 .order("id");
@@ -221,7 +221,7 @@
             }
 
             // 2. 查所有“尚未实际归还”的借用记录
-            const { data: records, error: rErr } = await supabaseClien
+            const { data: records, error: rErr } = await supabaseClient
                 .from("borrow_records")
                 .select("*")
                 .is("actual_return_time", null);
@@ -363,3 +363,4 @@
 </body>
 
 </html>
+
